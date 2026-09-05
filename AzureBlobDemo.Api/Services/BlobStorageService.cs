@@ -66,4 +66,23 @@ public class BlobStorageService : IBlobStorageService
 
         return new BlobPage(items, null);
     }
+
+    public async Task<(Stream Content, string ContentType, string ETag)?> OpenReadAsync(string blobName, CancellationToken cancellationToken = default)
+    {
+        var blob = _container.GetBlobClient(blobName);
+
+        try
+        {
+            Response<BlobDownloadStreamingResult> response = await blob.DownloadStreamingAsync(cancellationToken: cancellationToken);
+
+            var details = response.Value.Details;
+
+            return (response.Value.Content, details.ContentType, details.ETag.ToString());
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            _logger.LogInformation("Blob {BlobName} not found in {Container}", blobName, _options.ContainerName);
+            return null;
+        }
+    }
 }
