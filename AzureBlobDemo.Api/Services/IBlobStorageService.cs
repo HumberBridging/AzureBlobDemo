@@ -10,4 +10,8 @@ public interface IBlobStorageService
     /// <summary>Server-side paging. Never materialise an unbounded container into a List.</summary>
     Task<BlobPage> ListAsync(
         string? prefix, string? continuationToken, int pageSize, CancellationToken cancellationToken = default);
+
+    /// <summary>Streams a blob straight back to the caller. Returns null when the blob does not exist.</summary>
+    Task<(Stream Content, string ContentType, string ETag)?> OpenReadAsync(
+        string blobName, CancellationToken cancellationToken = default);
 }
