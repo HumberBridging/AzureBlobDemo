@@ -47,4 +47,27 @@ public class BlobsController : ControllerBase
         await _blobs.DeleteAsync(blobName, cancellationToken);
         return NoContent();
     }
+
+    /// <summary>Streams a blob's bytes back to the caller.</summary>
+    /// The * in [HttpGet("{*blobName}")] defines a catch-all route parameter (also known as a wildcard or greedy parameter) in ASP.NET Core endpoint routing
+    /// It tells the router engine to capture everything remaining in the URI path, including forward slashes, into that single parameter:
+    [HttpGet("{*blobName}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Download(string blobName, CancellationToken cancellationToken)
+    {
+        var result = await _blobs.OpenReadAsync(blobName, cancellationToken);
+
+        if (result is null)
+            return Problem(
+                title: "Blob not found",
+                detail: $"No blob named '{blobName}' exists in container '{_options.ContainerName}'.",
+                statusCode: StatusCodes.Status404NotFound);
+
+        var (content, contentType, etag) = result.Value;
+
+        // enableRangeProcessing lets a browser or video player ask for byte ranges instead of the whole file.
+        Response.Headers.ETag = etag;
+        return File(content, contentType, enableRangeProcessing: true);
+    }
 }
