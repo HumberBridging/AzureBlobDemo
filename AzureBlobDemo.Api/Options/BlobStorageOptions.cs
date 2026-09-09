@@ -19,6 +19,8 @@ public sealed class BlobStorageOptions
     /// </summary>
     public string? ConnectionString { get; set; }
 
+    public long MaxUploadBytes { get; set; } = 50L * 1024L * 1024L; // 50 MB
+
     public bool UsesEmulator =>
         ServiceUri is null && !string.IsNullOrWhiteSpace(ConnectionString);
 }
