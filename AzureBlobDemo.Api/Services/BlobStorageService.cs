@@ -85,4 +85,46 @@ public class BlobStorageService : IBlobStorageService
             return null;
         }
     }
+
+    public async Task<UploadResult> UploadAsync(string blobName, Stream content, string contentType, bool overwrite, IDictionary<string, string>? metadata = null, CancellationToken cancellationToken = default)
+    {
+        var blob = _container.GetBlobClient(blobName);
+
+        var uploadOptions = new BlobUploadOptions
+        {
+            HttpHeaders = new BlobHttpHeaders { ContentType = contentType },
+            Metadata = metadata,
+
+            // Parallel, chunked upload. The SDK splits anything over InitialTransferSize into blocks.
+            TransferOptions = new Azure.Storage.StorageTransferOptions
+            {
+                InitialTransferSize = 4 * 1024 * 1024,
+                MaximumTransferSize = 4 * 1024 * 1024,
+                MaximumConcurrency = 4
+            },
+
+            // Optimistic concurrency: IfNoneMatch = ETag.All means "only if this blob does not exist yet".
+            // Without it, two consumers uploading invoice.pdf silently overwrite each other.
+            Conditions = overwrite ? null : new BlobRequestConditions { IfNoneMatch = ETag.All }
+        };
+
+        //Very important to use a try/catch here to handle the RequestFailedException that can be thrown if the blob already exists and overwrite is false.
+        try
+        {
+            Response<BlobContentInfo> response = await blob.UploadAsync(content, uploadOptions, cancellationToken);
+
+            _logger.LogInformation("Uploaded {BlobName} ({ContentType}) to {Container}", blobName, contentType, _options.ContainerName);
+
+            return new UploadResult(
+                blobName,
+                response.Value.ETag.ToString(),
+                response.Value.LastModified,
+                content.CanSeek ? content.Length : 0);
+        }
+        catch (RequestFailedException ex) when (ex.Status == 409)
+        {
+            // 409 BlobAlreadyExists - surfaced by the IfNoneMatch condition above.
+            throw new InvalidOperationException($"A blob named '{blobName}' already exists. Pass overwrite=true to replace it.", ex);
+        }
+    }
 }

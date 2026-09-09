@@ -70,4 +70,54 @@ public class BlobsController : ControllerBase
         Response.Headers.ETag = etag;
         return File(content, contentType, enableRangeProcessing: true);
     }
+
+    [HttpPost]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(52_428_800)] // 50 MB - keep in sync with BlobStorage:MaxUploadBytes
+    [ProducesResponseType<UploadResult>(StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UploadResult>> Upload(
+        IFormFile file,
+        [FromQuery] string? blobName,
+        [FromQuery] bool overwrite = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (file is null || file.Length == 0)
+            return Problem(title: "Empty upload", detail: "No file content was received.",
+                           statusCode: StatusCodes.Status400BadRequest);
+
+        if (file.Length > _options.MaxUploadBytes)
+            return Problem(title: "File too large",
+                           detail: $"Maximum upload size is {_options.MaxUploadBytes / (1024 * 1024)} MB.",
+                           statusCode: StatusCodes.Status413PayloadTooLarge);
+
+        // Never trust a client-supplied file name as a path. Path.GetFileName strips any directory
+        // traversal ("../../secrets.txt" becomes "secrets.txt").
+        var name = Path.GetFileName(blobName ?? file.FileName);
+        if (string.IsNullOrWhiteSpace(name))
+            return Problem(title: "Invalid blob name", statusCode: StatusCodes.Status400BadRequest);
+
+        await using var stream = file.OpenReadStream();
+
+        try
+        {
+            var result = await _blobs.UploadAsync( name, stream, string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                overwrite,
+                metadata: new Dictionary<string, string>
+                {
+                    ["uploadedBy"] = User.Identity?.Name ?? "anonymous",
+                    ["originalName"] = file.FileName
+                },
+                cancellationToken);
+
+            return CreatedAtAction(nameof(Download), new { blobName = result.Name }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(title: "Blob already exists", detail: ex.Message,
+                           statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
 }
